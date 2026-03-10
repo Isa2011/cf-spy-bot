@@ -53,15 +53,20 @@ async def check_updates():
             await asyncio.sleep(60)
 
 async def main():
-    # 1. Запускаем сервер для порта
+    # 1. Запускаем сервер для Render
     await start_webserver()
-    # 2. Сбрасываем старые сообщения (важно для ошибки 409!)
+    
+    # 2. ЖЕСТКИЙ СБРОС (выгоняем призрака)
+    print("Принудительный сброс сессий...")
     await bot.delete_webhook(drop_pending_updates=True)
+    await asyncio.sleep(2) # Даем Telegram время «выдохнуть»
+    
     # 3. Запускаем слежку
     asyncio.create_task(check_updates())
+    
     # 4. Запускаем бота
     print("Бот-шпион в облаке запущен!")
-    await dp.start_polling(bot)
-
+    await dp.start_polling(bot, skip_updates=True) # skip_updates пропустит старый спам
 if __name__ == "__main__":
     asyncio.run(main())
+
