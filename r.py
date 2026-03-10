@@ -5,7 +5,7 @@ from aiohttp import web
 from datetime import datetime
 
 # --- НАСТРОЙКИ ---
-TOKEN = '8653073291:AAHAszBr4peH4c4A_QpxqboW4UwN_UXZF4g'
+TOKEN = '8653073291:AAG7ztIMZfgzvfJPr_vXQy5qhvywMWbHbvM'
 MY_CHAT_ID = 7951275068
 WATCH_LIST = ['Alihan_7', 'NullPhase', 'whyy', 'matanov']
 
@@ -69,4 +69,5 @@ async def main():
     await dp.start_polling(bot, skip_updates=True) # skip_updates пропустит старый спам
 if __name__ == "__main__":
     asyncio.run(main())
+
 
