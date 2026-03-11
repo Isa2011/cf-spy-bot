@@ -95,4 +95,72 @@ async def cmd_weak(message: types.Message, command: CommandObject):
     failed_tags = [tag for sub in res if sub['verdict'] != 'OK' for tag in sub['problem'].get('tags', [])]
     if not failed_tags:
         return await message.answer("🎉 Ошибок не найдено!")
-    common = Counter(failed_tags).most_
+    common = Counter(failed_tags).most_common(5)
+    report = "\n".join([f"🔸 *{tag}*: {count} раз" for tag, count in common])
+    await message.answer(f"📊 **Слабые темы {handle}:**\n\n{report}", parse_mode="Markdown")
+
+@dp.message(Command("contests"))
+async def cmd_contests(message: types.Message):
+    res = await fetch_cf("contest.list", {"gym": "false"})
+    if not res: return await message.answer("Ошибка связи с сервером CF.")
+    upcoming = [c for c in res if c['phase'] == 'BEFORE'][::-1]
+    text = "📅 **Ближайшие раунды:**\n\n"
+    for c in upcoming[:4]:
+        text += f"🏆 {c['name']}\n\n"
+    await message.answer(text, parse_mode="Markdown")
+
+# --- МОНИТОРИНГ ---
+async def checker():
+    await asyncio.sleep(5)
+    while True:
+        for handle in list(FRIENDS):
+            res = await fetch_cf("user.status", {"handle": handle, "from": 1, "count": 1})
+            if res and res[0]['verdict'] == 'OK':
+                sub = res[0]
+                s_id = sub['id']
+                if handle not in last_solved_ids:
+                    last_solved_ids[handle] = s_id
+                elif last_solved_ids[handle] != s_id:
+                    last_solved_ids[handle] = s_id
+                    p = sub['problem']
+                    msg = (f"🔥 **{handle}** решил задачу!\n\n"
+                           f"📝 {p['name']}\n"
+                           f"📊 Рейтинг: {p.get('rating', '???')}\n"
+                           f"🏷 `{', '.join(p.get('tags', []))}`\n"
+                           f"🔗 [Открыть задачу](https://codeforces.com/contest/{sub.get('contestId')}/problem/{p['index']})")
+                    try:
+                        await bot.send_message(ADMIN_ID, msg, parse_mode="Markdown", disable_web_page_preview=True)
+                    except Exception as e:
+                        logger.error(f"Notify error: {e}")
+            await asyncio.sleep(2)
+        await asyncio.sleep(60)
+
+# --- ВЕБ-СЕРВЕР ДЛЯ RENDER ---
+async def handle_web(request):
+    return web.Response(text="Bot is running")
+
+async def main():
+    app = web.Application()
+    app.router.add_get("/", handle_web)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 10000)
+    await site.start()
+
+    await bot.set_my_commands([
+        BotCommand(command="start", description="Перезапустить"),
+        BotCommand(command="cf_follow", description="Следить за ником"),
+        BotCommand(command="list", description="Кто в списке?"),
+        BotCommand(command="weak", description="Анализ ошибок"),
+        BotCommand(command="contests", description="Расписание")
+    ])
+    
+    asyncio.create_task(checker())
+    await dp.start_polling(bot)
+
+# ЭТОТ БЛОК ОБЯЗАТЕЛЕН:
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Bot stopped")
