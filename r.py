@@ -212,8 +212,17 @@ Contest: {contest}
 
 # ---------- MAIN ----------
 
+async def post_init(application):
+    asyncio.create_task(tracker(application))
+
+
 def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = (
+        ApplicationBuilder()
+        .token(TOKEN)
+        .post_init(post_init)
+        .build()
+    )
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("add", add))
@@ -222,11 +231,8 @@ def main():
     app.add_handler(CommandHandler("rating", rating))
     app.add_handler(CommandHandler("last", last))
 
-    asyncio.create_task(tracker(app))
-
     app.run_polling()
 
 
 if __name__ == "__main__":
     main()
-
