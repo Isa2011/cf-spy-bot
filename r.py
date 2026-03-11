@@ -415,7 +415,19 @@ async def spy():
                         if data["status"]!="OK":
                             continue
 
-                        sub=data["result"][0]["id"]
+                        submission = data["result"][0]
+
+                        sub = submission["id"]
+                        
+                        problem = submission["problem"]
+                        
+                        contest = problem["contestId"]
+                        index = problem["index"]
+                        
+                        name = problem["name"]
+                        rating = problem.get("rating","?")
+                        
+                        link = f"https://codeforces.com/contest/{contest}/problem/{index}"
 
                         if u not in last_submission:
 
@@ -456,3 +468,4 @@ async def main():
 
 if __name__=="__main__":
     asyncio.run(main())
+
