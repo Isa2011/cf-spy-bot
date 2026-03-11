@@ -1,5 +1,5 @@
 import logging
-import asyncio
+import random
 import aiohttp
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -45,7 +45,6 @@ async def cmd_cf(message: types.Message):
 @dp.message(Command("random"))
 @owner_only
 async def cmd_random(message: types.Message):
-    import random
     await message.reply(f"🎲 Случайное число: {random.randint(1,100)}")
 
 @dp.message(Command("joke"))
@@ -77,7 +76,6 @@ async def cb_handler(query: types.CallbackQuery):
         rating = await get_cf_rating(CODEFORCES_HANDLE)
         await query.message.edit_text(f"💻 {CODEFORCES_HANDLE} — рейтинг: {rating}")
     elif query.data == "random":
-        import random
         await query.message.edit_text(f"🎲 Случайное число: {random.randint(1,100)}")
     elif query.data == "joke":
         await query.message.edit_text("😂 Почему программисты любят темноту? Потому что свет привлекает баги!")
