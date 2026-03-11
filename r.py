@@ -6,39 +6,23 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.client.bot import DefaultBotProperties
 
 # ---------------- Настройки ----------------
 TOKEN = "8771638954:AAG9mrksptIJKh-62ltsIVp-UF1E8GTqswA"
-OWNER_ID = 7951275068  # твой Telegram ID
-CHAT_ID = -4993544380  # ID группы/канала для уведомлений
+OWNER_ID = 7951275068
+CHAT_ID = -4993544380
 MY_HANDLE = "whyy"
+CHECK_INTERVAL = 60
 
-CHECK_INTERVAL = 60  # проверка каждые 60 секунд
+# Webhook
+WEBHOOK_HOST = "https://your-app.onrender.com"
+WEBHOOK_PATH = "/webhook"
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
-from aiogram.client.bot import DefaultBotProperties
-
-bot = Bot(
-    token=TOKEN,
-    default=DefaultBotProperties(
-        parse_mode="HTML"  # теперь указываем здесь
-    )
-)
-dp = Dispatcher()
-
-logging.basicConfig(level=logging.INFO)
-
-# ---------------- main ---------------- #
-async def main():
-    global session
-    session = aiohttp.ClientSession()  # создаём сессию внутри async функции
-    try:
-        asyncio.create_task(monitor_friends())
-        asyncio.create_task(start_web())
-        await dp.start_polling(bot)
-    finally:
-        await session.close()
-        await bot.session.close()
+# ---------------- Локальные переменные ----------------
 last_submissions = {}
+session: aiohttp.ClientSession = None
 
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
@@ -50,40 +34,34 @@ keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# ---------------- API ---------------- #
+# ---------------- Бот ----------------
+bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+dp = Dispatcher()
 
+logging.basicConfig(level=logging.INFO)
+
+# ---------------- API ----------------
 async def get_user_info(handle):
-    url = f"https://codeforces.com/api/user.info?handles={handle}"
-    async with session.get(url) as r:
-        data = await r.json()
-        return data["result"][0]
+    async with session.get(f"https://codeforces.com/api/user.info?handles={handle}") as r:
+        return (await r.json())["result"][0]
 
 async def get_user_submissions(handle):
-    url = f"https://codeforces.com/api/user.status?handle={handle}&from=1&count=50"
-    async with session.get(url) as r:
-        data = await r.json()
-        return data["result"]
+    async with session.get(f"https://codeforces.com/api/user.status?handle={handle}&from=1&count=50") as r:
+        return (await r.json())["result"]
 
 async def get_problems():
-    url = "https://codeforces.com/api/problemset.problems"
-    async with session.get(url) as r:
-        data = await r.json()
-        return data["result"]
+    async with session.get("https://codeforces.com/api/problemset.problems") as r:
+        return (await r.json())["result"]
 
 async def get_contests():
-    url = "https://codeforces.com/api/contest.list"
-    async with session.get(url) as r:
-        data = await r.json()
-        return data["result"]
+    async with session.get("https://codeforces.com/api/contest.list") as r:
+        return (await r.json())["result"]
 
 async def get_friends():
-    url = f"https://codeforces.com/api/user.friends?handle={MY_HANDLE}"
-    async with session.get(url) as r:
-        data = await r.json()
-        return data["result"]  # список handle друзей
+    async with session.get(f"https://codeforces.com/api/user.friends?handle={MY_HANDLE}") as r:
+        return (await r.json())["result"]
 
-# ---------------- Мониторинг ---------------- #
-
+# ---------------- Мониторинг ----------------
 async def monitor_friends():
     await bot.wait_until_ready()
     while True:
@@ -93,180 +71,74 @@ async def monitor_friends():
                 subs = await get_user_submissions(handle)
                 if not subs:
                     continue
-
                 if handle not in last_submissions:
                     last_submissions[handle] = subs[0]["id"]
                     continue
-
                 for s in subs:
                     if s["id"] == last_submissions[handle]:
                         break
                     if s["verdict"] == "OK":
                         p = s["problem"]
-                        name = p["name"]
-                        rating = p.get("rating", "?")
-                        contest = p["contestId"]
-                        index = p["index"]
-                        link = f"https://codeforces.com/problemset/problem/{contest}/{index}"
-                        msg = f"""
-Пользователь {handle} только что решил задачу:
-
-<a href="{link}">{name}</a>
-Рейтинг задачи: {rating}
-"""
-                        # Отправка в личку владельцу
+                        link = f"https://codeforces.com/problemset/problem/{p['contestId']}/{p['index']}"
+                        msg = f"Пользователь {handle} только что решил задачу:\n\n<a href='{link}'>{p['name']}</a>\nРейтинг задачи: {p.get('rating','?')}"
                         await bot.send_message(OWNER_ID, msg)
-                        # Отправка в группу/канал
                         await bot.send_message(CHAT_ID, msg)
                 last_submissions[handle] = subs[0]["id"]
         except Exception as e:
             print("Ошибка мониторинга друзей:", e)
         await asyncio.sleep(CHECK_INTERVAL)
 
-# ---------------- Suggest ---------------- #
-
+# ---------------- Suggest ----------------
 async def suggest_problem():
     user = await get_user_info(MY_HANDLE)
     rating = user.get("rating", 1200)
     data = await get_problems()
     problems = data["problems"]
     subs = await get_user_submissions(MY_HANDLE)
-    solved = set()
-    for s in subs:
-        if s["verdict"] == "OK":
-            solved.add((s["problem"]["contestId"], s["problem"]["index"]))
-    candidates = []
-    for p in problems:
-        if "rating" not in p:
-            continue
-        r = p["rating"]
-        if rating + 100 <= r <= 2500:
-            if (p["contestId"], p["index"]) not in solved:
-                candidates.append(p)
+    solved = {(s["problem"]["contestId"], s["problem"]["index"]) for s in subs if s["verdict"]=="OK"}
+    candidates = [p for p in problems if "rating" in p and rating+100 <= p["rating"] <= 2500 and (p["contestId"], p["index"]) not in solved]
     if not candidates:
         return "Не найдено задач"
     p = random.choice(candidates)
     link = f"https://codeforces.com/problemset/problem/{p['contestId']}/{p['index']}"
-    return f"""
-Попробуй решить задачу:
+    return f"Попробуй решить задачу:\n\n<a href='{link}'>{p['name']}</a>\nРейтинг: {p['rating']}"
 
-<a href="{link}">{p['name']}</a>
-Рейтинг: {p['rating']}
-"""
-
-# ---------------- Команды ---------------- #
-
+# ---------------- Команды ----------------
 @dp.message(Command("start"))
 async def start(msg: types.Message):
     await msg.answer("Бот Codeforces запущен!", reply_markup=keyboard)
 
 @dp.message(Command("help"))
 async def help_cmd(msg: types.Message):
-    text = """
-Команды бота:
-
-/suggest — предложить задачу
-/stats — статистика
-/top — топ друзей
-/solved — решено задач
-/rating — рейтинг
-/contest — контесты
-/problem <rating> — задача по рейтингу
-/compare <handle> — сравнить рейтинг
-"""
+    text = "/suggest — предложить задачу\n/stats — статистика\n/top — топ друзей\n/solved — решено задач\n/rating — рейтинг\n/contest — контесты"
     await msg.answer(text)
 
 @dp.message(Command("suggest"))
 async def suggest(msg: types.Message):
     await msg.answer(await suggest_problem())
 
-@dp.message(Command("stats"))
-async def stats(msg: types.Message):
-    user = await get_user_info(MY_HANDLE)
-    text = f"""
-Статистика пользователя {MY_HANDLE}:
-
-Рейтинг: {user.get("rating","нет")}
-Максимальный рейтинг: {user.get("maxRating","нет")}
-Ранг: {user.get("rank","")}
-"""
-    await msg.answer(text)
-
-@dp.message(Command("top"))
-async def top(msg: types.Message):
-    friends = await get_friends()
-    users = []
-    for f in friends:
-        info = await get_user_info(f)
-        users.append((f, info.get("rating",0)))
-    users.sort(key=lambda x:x[1], reverse=True)
-    text = "Топ друзей:\n\n"
-    for i,(n,r) in enumerate(users,1):
-        text += f"{i}. {n} — {r}\n"
-    await msg.answer(text)
-
-@dp.message(Command("rating"))
-async def rating(msg: types.Message):
-    user = await get_user_info(MY_HANDLE)
-    await msg.answer(f"Рейтинг {MY_HANDLE}: {user.get('rating','нет')}")
-
-@dp.message(Command("solved"))
-async def solved(msg: types.Message):
-    subs = await get_user_submissions(MY_HANDLE)
-    solved = set()
-    for s in subs:
-        if s["verdict"] == "OK":
-            solved.add((s["problem"]["contestId"], s["problem"]["index"]))
-    await msg.answer(f"Решено задач: {len(solved)}")
-
-@dp.message(Command("contest"))
-async def contests(msg: types.Message):
-    contests = await get_contests()
-    upcoming = [c for c in contests if c["phase"]=="BEFORE"]
-    text = "Ближайшие контесты:\n\n"
-    for c in upcoming[:5]:
-        text += f"{c['name']}\n"
-    await msg.answer(text)
-
-# ---------------- кнопки ---------------- #
-
-@dp.message(lambda m: m.text=="Предложить задачу")
-async def btn1(msg: types.Message):
-    await msg.answer(await suggest_problem())
-
-@dp.message(lambda m: m.text=="Моя статистика")
-async def btn2(msg: types.Message):
-    await stats(msg)
-
-@dp.message(lambda m: m.text=="Топ друзей")
-async def btn3(msg: types.Message):
-    await top(msg)
-
-@dp.message(lambda m: m.text=="Рейтинг")
-async def btn4(msg: types.Message):
-    await rating(msg)
-
-# ---------------- Keep Alive ---------------- #
-
+# ---------------- Keep Alive ----------------
 async def handle(request):
     return web.Response(text="Bot alive")
 
-async def start_web():
-    app = web.Application()
-    app.router.add_get('/', handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
-    await site.start()
-
-# ---------------- main ---------------- #
-
-async def main():
+# ---------------- Webhook ----------------
+async def on_startup():
+    global session
+    session = aiohttp.ClientSession()
+    await bot.delete_webhook(drop_pending_updates=True)
+    await bot.set_webhook(WEBHOOK_URL)
     asyncio.create_task(monitor_friends())
-    asyncio.create_task(start_web())
-    await dp.start_polling(bot)
 
-if __name__=="__main__":
-    asyncio.run(main())
+async def on_shutdown():
+    await bot.delete_webhook()
+    await bot.session.close()
+    await session.close()
 
+app = web.Application()
+app.router.add_post(WEBHOOK_PATH, bot.webhook_handler)
+app.router.add_get('/', handle)
 
+# ---------------- Запуск ----------------
+if __name__ == "__main__":
+    web.run_app(app, host='0.0.0.0', port=8080, shutdown_timeout=5)
+    asyncio.run(on_startup())
