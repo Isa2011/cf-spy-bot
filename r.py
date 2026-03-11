@@ -27,7 +27,17 @@ dp = Dispatcher()
 
 logging.basicConfig(level=logging.INFO)
 
-session = aiohttp.ClientSession()
+# ---------------- main ---------------- #
+async def main():
+    global session
+    session = aiohttp.ClientSession()  # создаём сессию внутри async функции
+    try:
+        asyncio.create_task(monitor_friends())
+        asyncio.create_task(start_web())
+        await dp.start_polling(bot)
+    finally:
+        await session.close()
+        await bot.session.close()
 last_submissions = {}
 
 keyboard = ReplyKeyboardMarkup(
@@ -258,4 +268,5 @@ async def main():
 
 if __name__=="__main__":
     asyncio.run(main())
+
 
