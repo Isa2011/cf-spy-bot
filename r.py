@@ -1,125 +1,213 @@
-import asyncio, sqlite3, random, logging, os, aiohttp
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-from aiohttp import web
+import requests
+import asyncio
+from telegram import Update, BotCommand
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# --- КОНФИГУРАЦИЯ ---
-TOKEN = "8653073291:AAE2wrd9z9uQecOAs12qCWuinCBlY6ljf5w"
-PORT = int(os.environ.get("PORT", 10000))
-logging.basicConfig(level=logging.INFO)
-bot = Bot(token=TOKEN)
-dp = Dispatcher()
+TOKEN = "8653073291:AAG6jr04iA3i6-_3VXsHjSgXoipZtSC88fM"
+OWNER_ID = 7951275068  # твой Telegram ID
 
-# --- БАЗА ДАННЫХ ---
-def init_db():
-    conn = sqlite3.connect("spy.db")
-    cur = conn.cursor()
-    cur.execute("CREATE TABLE IF NOT EXISTS watching (chat_id INTEGER, handle TEXT, last_sub_id INTEGER)")
-    cur.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT, tasks INTEGER DEFAULT 0, xp INTEGER DEFAULT 0, lvl INTEGER DEFAULT 1, todo TEXT DEFAULT '')")
-    conn.commit()
-    conn.close()
+handles = set()
+last_submissions = {}
 
-init_db()
+tracking = True
 
-# --- WEB SERVER (Для Render) ---
-async def handle(request): return web.Response(text="Spy Bot is Active")
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get("/", handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    await web.TCPSite(runner, "0.0.0.0", PORT).start()
 
-# --- CF SPY LOGIC ---
-async def check_cf_updates():
+def is_owner(update: Update):
+    return update.effective_user.id == OWNER_ID
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update):
+        return
+    await update.message.reply_text(
+        "🤖 Codeforces Tracker Bot\n"
+        "/add handle\n"
+        "/remove handle\n"
+        "/list\n"
+        "/rating handle\n"
+        "/last handle\n"
+        "/starttrack\n"
+        "/stop"
+    )
+
+
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update):
+        return
+    await start(update, context)
+
+
+async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update):
+        return
+
+    if not context.args:
+        await update.message.reply_text("Usage: /add handle")
+        return
+
+    handle = context.args[0]
+    handles.add(handle)
+    await update.message.reply_text(f"✅ Added {handle}")
+
+
+async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update):
+        return
+
+    if not context.args:
+        return
+
+    handle = context.args[0]
+    handles.discard(handle)
+    await update.message.reply_text(f"❌ Removed {handle}")
+
+
+async def list_handles(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update):
+        return
+
+    if not handles:
+        await update.message.reply_text("No handles")
+        return
+
+    text = "\n".join(handles)
+    await update.message.reply_text(text)
+
+
+async def rating(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update):
+        return
+
+    if not context.args:
+        return
+
+    handle = context.args[0]
+
+    url = f"https://codeforces.com/api/user.info?handles={handle}"
+    data = requests.get(url).json()
+
+    if data["status"] != "OK":
+        await update.message.reply_text("User not found")
+        return
+
+    r = data["result"][0]
+
+    text = f"""
+👤 {handle}
+Rating: {r.get("rating", "unrated")}
+Max: {r.get("maxRating", "unrated")}
+Rank: {r.get("rank","")}
+"""
+    await update.message.reply_text(text)
+
+
+async def last(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update):
+        return
+
+    handle = context.args[0]
+
+    url = f"https://codeforces.com/api/user.status?handle={handle}&from=1&count=5"
+    data = requests.get(url).json()
+
+    res = data["result"]
+
+    text = ""
+
+    for s in res:
+        name = s["problem"]["name"]
+        verdict = s["verdict"]
+        text += f"{name} — {verdict}\n"
+
+    await update.message.reply_text(text)
+
+
+async def starttrack(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global tracking
+    if not is_owner(update):
+        return
+    tracking = True
+    await update.message.reply_text("▶ Tracking started")
+
+
+async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global tracking
+    if not is_owner(update):
+        return
+    tracking = False
+    await update.message.reply_text("⛔ Tracking stopped")
+
+
+async def tracker(app):
+    global last_submissions
+
     while True:
-        try:
-            conn = sqlite3.connect("spy.db")
-            cur = conn.cursor()
-            cur.execute("SELECT chat_id, handle, last_sub_id FROM watching")
-            targets = cur.fetchall()
-            async with aiohttp.ClientSession() as session:
-                for chat_id, handle, last_id in targets:
+
+        if tracking:
+
+            for handle in handles:
+
+                try:
+
                     url = f"https://codeforces.com/api/user.status?handle={handle}&from=1&count=1"
-                    async with session.get(url, timeout=5) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            if data["status"] == "OK" and data["result"]:
-                                s = data["result"][0]
-                                if s["id"] != last_id:
-                                    if s.get("verdict") == "OK":
-                                        p = s["problem"]
-                                        rating = p.get('rating', '???')
-                                        msg = f"🔥 **{handle}** затащил задачу!\n🔹 `{p['index']}. {p['name']}`\n📊 Рейтинг: **{rating}**"
-                                        await bot.send_message(chat_id, msg, parse_mode="Markdown")
-                                    cur.execute("UPDATE watching SET last_sub_id = ? WHERE chat_id = ? AND handle = ?", (s["id"], chat_id, handle))
-                                    conn.commit()
-            conn.close()
-        except: pass
-        await asyncio.sleep(60)
+                    data = requests.get(url).json()
 
-# --- КОМАНДЫ ШПИОНАЖА ---
-@dp.message(Command("cf_follow"))
-async def f(m: types.Message):
-    h = m.text.replace("/cf_follow", "").strip()
-    if not h: return await m.answer("Укажи ник!")
-    conn = sqlite3.connect("spy.db"); cur = conn.cursor()
-    cur.execute("INSERT INTO watching VALUES (?, ?, 0)", (m.chat.id, h))
-    conn.commit(); conn.close()
-    await m.answer(f"👀 Слежу за `{h}`. Как решит — маякну!")
+                    if data["status"] != "OK":
+                        continue
 
-@dp.message(Command("cf_list"))
-async def cf_l(m: types.Message):
-    conn = sqlite3.connect("spy.db"); cur = conn.cursor()
-    cur.execute("SELECT handle FROM watching WHERE chat_id = ?", (m.chat.id,))
-    res = cur.fetchall()
-    if not res: return await m.answer("Список слежки пуст.")
-    await m.answer("🕵️‍♂️ **Ты следишь за:**\n" + "\n".join([f"• {r[0]}" for r in res]))
+                    sub = data["result"][0]
 
-# --- КОМАНДЫ ПРОГРЕССА ---
-@dp.message(Command("done"))
-async def d(m: types.Message):
-    task = m.text.replace("/done", "").strip() or "Задача"
-    conn = sqlite3.connect("spy.db"); cur = conn.cursor()
-    cur.execute("INSERT OR IGNORE INTO users (id, name) VALUES (?, ?)", (m.from_user.id, m.from_user.full_name))
-    cur.execute("UPDATE users SET tasks = tasks + 1, xp = xp + 50, lvl = (xp + 50) / 200 + 1 WHERE id = ?", (m.from_user.id,))
-    conn.commit(); conn.close()
-    await m.answer(f"✅ Красава! +50 XP за: {task}")
+                    sid = sub["id"]
 
-@dp.message(Command("stats"))
-async def st(m: types.Message):
-    conn = sqlite3.connect("spy.db"); cur = conn.cursor()
-    cur.execute("SELECT tasks, xp, lvl FROM users WHERE id = ?", (m.from_user.id,))
-    d = cur.fetchone()
-    if not d: return await m.answer("Напиши /done для начала!")
-    await m.answer(f"👤 **{m.from_user.first_name}**\n🏆 LVL: {d[2]}\n🔥 XP: {d[1]}\n🎯 Задач: {d[0]}")
+                    if handle not in last_submissions:
+                        last_submissions[handle] = sid
+                        continue
 
-# --- ТУЛЗЫ И ФАН (РЕАЛЬНЫЕ) ---
-@dp.message(Command("calc"))
-async def calc(m: types.Message):
-    try:
-        expr = m.text.replace("/calc", "").strip()
-        await m.answer(f"🔢 Результат: `{eval(expr, {'__builtins__': {}})}`")
-    except: await m.answer("Ошибка! Пример: `/calc 1024 / 8`")
+                    if sid != last_submissions[handle]:
 
-@dp.message(Command("roll"))
-async def roll(m: types.Message): await m.answer(f"🎲 Выпало: {random.randint(1, 100)}")
+                        last_submissions[handle] = sid
 
-@dp.message(Command("joke"))
-async def joke(m: types.Message):
-    jokes = ["Билл Гейтс заходит в бар... а там 404.", "Почему программисты путают Хэллоуин и Рождество? Потому что 31 Oct = 25 Dec."]
-    await m.answer(random.choice(jokes))
+                        if sub["verdict"] == "OK":
 
-@dp.message(Command("help"))
-async def h(m: types.Message):
-    await m.answer("🚀 **Spy Bot 2.0**\n\n**CF:** /cf_follow, /cf_list, /cf_check\n**Stats:** /done, /stats, /top, /rank\n**Tools:** /calc, /joke, /roll, /ping, /id")
+                            problem = sub["problem"]["name"]
+                            contest = sub["problem"].get("contestId", "")
 
-# --- ЗАПУСК ---
+                            msg = f"""
+✅ {handle} solved a problem!
+
+Problem: {problem}
+Contest: {contest}
+"""
+
+                            await app.bot.send_message(
+                                chat_id=OWNER_ID,
+                                text=msg
+                            )
+
+                except:
+                    pass
+
+        await asyncio.sleep(30)
+
+
 async def main():
-    asyncio.create_task(start_web_server())
-    await bot.delete_webhook(drop_pending_updates=True)
-    asyncio.create_task(check_cf_updates())
-    await dp.start_polling(bot)
+
+    app = ApplicationBuilder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler("add", add))
+    app.add_handler(CommandHandler("remove", remove))
+    app.add_handler(CommandHandler("list", list_handles))
+    app.add_handler(CommandHandler("rating", rating))
+    app.add_handler(CommandHandler("last", last))
+    app.add_handler(CommandHandler("starttrack", starttrack))
+    app.add_handler(CommandHandler("stop", stop))
+
+    asyncio.create_task(tracker(app))
+
+    await app.run_polling()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
