@@ -6,21 +6,13 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 
 TOKEN = "8653073291:AAG6jr04iA3i6-_3VXsHjSgXoipZtSC88fM"
-OWNER_ID = 7951275068  # твой Telegram ID
+OWNER_ID = 7951275068
 CODEFORCES_HANDLE = "whyy"
 
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
-import asyncio
-
-# Очистка старых обновлений, чтобы не было конфликта
-async def clear_updates():
-    await bot.delete_webhook(drop_pending_updates=True)
-    print("Webhook удален, старые обновления очищены")
-
-asyncio.run(clear_updates())
 
 # ===== Проверка владельца =====
 def owner_only(func):
@@ -109,8 +101,15 @@ async def get_cf_rating(handle):
     except:
         return "ошибка"
 
-# ===== Запуск бота =====
+# ===== Запуск бота с очисткой обновлений =====
 if __name__ == "__main__":
     import asyncio
-    asyncio.run(dp.start_polling(bot))
 
+    async def main():
+        # удаляем старые вебхуки и pending updates
+        await bot.delete_webhook(drop_pending_updates=True)
+        print("Webhook удален, старые обновления очищены")
+        # запускаем polling
+        await dp.start_polling(bot)
+
+    asyncio.run(main())
