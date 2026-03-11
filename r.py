@@ -1,147 +1,158 @@
 import asyncio
 import logging
 import json
+import os
 import aiohttp
-from aiogram import Bot, Dispatcher, types
+from datetime import datetime
+from collections import Counter
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandObject
 from aiogram.types import BotCommand
-from collections import Counter
 
-# --- НАСТРОЙКИ ---
-# Вставь сюда свой токен без пробелов
-API_TOKEN = '8653073291:AAEZYYUIVROV37Hdx0Cr3ztuSnUhdZ8lzpg' 
-# Вставь сюда СВОЙ числовой ID (узнай в @userinfobot)
-ADMIN_ID = 7951275068  
+# --- КОНФИГУРАЦИЯ ---
+API_TOKEN = '8653073291:AAEZYYUIVROV37Hdx0Cr3ztuSnUhdZ8lzpg'
+ADMIN_ID = 7951275068
+DB_FILE = "friends_db.json"
 
-DB_FILE = "friends.json"
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-def load_friends():
-    try:
-        with open(DB_FILE, "r") as f: return set(json.load(f))
-    except: return set()
+# --- РАБОТА С ДАННЫМИ ---
+def load_db():
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r") as f:
+            return set(json.load(f))
+    return set()
 
-def save_friends():
-    with open(DB_FILE, "w") as f: json.dump(list(FRIENDS), f)
+def save_db(data):
+    with open(DB_FILE, "w") as f:
+        json.dump(list(data), f)
 
-FRIENDS = load_friends()
+FRIENDS = load_db()
 last_solved_ids = {}
+session = None
 
+async def get_session():
+    global session
+    if session is None or session.closed:
+        session = aiohttp.ClientSession()
+    return session
+
+async def fetch_cf(method, params=None):
+    s = await get_session()
+    url = f"https://codeforces.com/api/{method}"
+    try:
+        async with s.get(url, params=params, timeout=15) as resp:
+            data = await resp.json()
+            if data.get("status") == "OK":
+                return data.get("result")
+            return None
+    except Exception as e:
+        logger.error(f"CF API Error ({method}): {e}")
+        return None
+
+# --- ОБРАБОТЧИКИ КОМАНД ---
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-async def fetch_cf(method, params):
-    async with aiohttp.ClientSession() as session:
-        url = f"https://codeforces.com/api/{method}"
-        try:
-            async with session.get(url, params=params, timeout=15) as resp:
-                data = await resp.json()
-                if data.get("status") == "OK":
-                    return data.get("result")
-                return None
-        except Exception as e:
-            logging.error(f"CF API Error: {e}")
-            return None
-
-# --- КОМАНДЫ ---
-
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    await message.answer(
-        "🚀 **CF Watcher AI запущен!**\n\n"
-        "Я буду следить за твоими друзьями и подсказывать, где твои слабые места.\n"
-        "Жми кнопку 'Меню', чтобы увидеть все команды."
+    welcome_text = (
+        "🤖 **CF Spy Bot v2.0**\n\n"
+        "Я слежу за активностью на Codeforces и помогаю расти.\n"
+        "• Добавить друга: `/cf_follow ник`\n"
+        "• Мои ошибки: `/weak ник`\n"
+        "• Турниры: `/contests`"
     )
+    await message.answer(welcome_text, parse_mode="Markdown")
 
 @dp.message(Command("cf_follow"))
 async def cmd_follow(message: types.Message, command: CommandObject):
     if not command.args:
-        return await message.answer("⚠️ Пиши: `/cf_follow ник_друга`", parse_mode="Markdown")
+        return await message.answer("⚠️ Укажите ник: `/cf_follow tourist`")
+    
     handle = command.args.strip()
     FRIENDS.add(handle)
-    save_friends()
-    await message.answer(f"✅ Добавил **{handle}** в список. Теперь я не спущу с него глаз!", parse_mode="Markdown")
+    save_db(FRIENDS)
+    await message.answer(f"✅ Теперь я слежу за **{handle}**", parse_mode="Markdown")
+
+@dp.message(Command("list"))
+async def cmd_list(message: types.Message):
+    if not FRIENDS:
+        return await message.answer("❌ Список слежки пуст.")
+    names = "\n".join([f"• `{h}`" for h in FRIENDS])
+    await message.answer(f"👥 **В списке слежки:**\n{names}", parse_mode="Markdown")
 
 @dp.message(Command("weak"))
 async def cmd_weak(message: types.Message, command: CommandObject):
-    handle = command.args.strip() if command.args else "tourist" # Поставь свой ник
-    await message.answer(f"🧪 Анализирую последние 100 посылок {handle}...")
-    res = await fetch_cf("user.status", {"handle": handle, "from": 1, "count": 100})
-    if res:
-        # Считаем только теги задач, которые НЕ были решены (вердикт не OK)
-        wrong_tags = [tag for sub in res if sub['verdict'] != 'OK' for tag in sub['problem'].get('tags', [])]
-        if not wrong_tags:
-            return await message.answer("💪 Ошибок нет. Либо ты гений, либо мало решаешь!")
-        
-        top = Counter(wrong_tags).most_common(5)
-        text = "\n".join([f"❌ **{tag}**: {count} провалов" for tag, count in top])
-        await message.answer(f"⚠️ **Твои зоны роста (Weak Topics):**\n\n{text}", parse_mode="Markdown")
-
-@dp.message(Command("compare"))
-async def cmd_compare(message: types.Message, command: CommandObject):
-    if not command.args:
-        return await message.answer("Пиши: `/compare ник_друга`")
+    handle = command.args.strip() if command.args else "tourist"
+    await message.answer(f"🔎 Анализирую последние 100 попыток `{handle}`...", parse_mode="Markdown")
     
-    # Сравниваем tourist (как пример) и твоего друга
-    handles = f"tourist;{command.args.strip()}"
-    res = await fetch_cf("user.info", {"handles": handles})
-    if res and len(res) == 2:
-        u1, u2 = res[0], res[1]
-        msg = (f"⚔️ **Битва рейтингов:**\n\n"
-               f"👤 {u1['handle']}: {u1.get('rating', 0)} ({u1.get('rank', 'N/A')})\n"
-               f"👤 {u2['handle']}: {u2.get('rating', 0)} ({u2.get('rank', 'N/A')})\n\n"
-               f"📈 Разница: {abs(u1.get('rating', 0) - u2.get('rating', 0))}")
-        await message.answer(msg)
+    res = await fetch_cf("user.status", {"handle": handle, "from": 1, "count": 100})
+    if not res:
+        return await message.answer("Не удалось получить данные. Проверь ник.")
 
-# --- ФОНОВАЯ ПРОВЕРКА ---
+    failed_tags = [tag for sub in res if sub['verdict'] != 'OK' for tag in sub['problem'].get('tags', [])]
+    if not failed_tags:
+        return await message.answer("🎉 Ошибок не найдено! Либо мало задач, либо ты машина.")
+
+    common = Counter(failed_tags).most_common(5)
+    report = "\n".join([f"🔸 *{tag}*: {count} раз" for tag, count in common])
+    await message.answer(f"📊 **Слабые темы {handle}:**\n\n{report}\n\nПорешай задачи с этими тегами!", parse_mode="Markdown")
+
+@dp.message(Command("contests"))
+async def cmd_contests(message: types.Message):
+    res = await fetch_cf("contest.list", {"gym": "false"})
+    if not res: return await message.answer("Ошибка связи с сервером CF.")
+
+    upcoming = [c for c in res if c['phase'] == 'BEFORE'][::-1]
+    text = "📅 **Ближайшие раунды:**\n\n"
+    for c in upcoming[:4]:
+        text += f"🏆 {c['name']}\n\n"
+    await message.answer(text, parse_mode="Markdown")
+
+# --- ФОНОВЫЙ МОНИТОРИНГ ---
 async def checker():
+    await asyncio.sleep(5) # Даем боту запуститься
     while True:
-        if not FRIENDS or ADMIN_ID == 0:
-            await asyncio.sleep(20)
-            continue
-            
         for handle in list(FRIENDS):
-            res = await fetch_cf("user.status", {"handle": handle, "from": 1, "count": 5})
-            if res:
-                for sub in res:
-                    if sub['verdict'] == 'OK':
-                        s_id = sub['id']
-                        if handle not in last_solved_ids:
-                            last_solved_ids[handle] = s_id
-                        elif last_solved_ids[handle] != s_id:
-                            last_solved_ids[handle] = s_id
-                            prob = sub['problem']
-                            text = (f"🔔 **{handle}** только что закрыл задачу!\n\n"
-                                    f"📓 {prob['name']}\n"
-                                    f"📊 Рейтинг: {prob.get('rating', '???')}\n"
-                                    f"🏷 Теги: {', '.join(prob.get('tags', []))}\n"
-                                    f"🔗 [Решение](https://codeforces.com/contest/{sub.get('contestId')}/problem/{prob['index']})")
-                            try:
-                                await bot.send_message(ADMIN_ID, text, parse_mode="Markdown", disable_web_page_preview=True)
-                            except Exception as e:
-                                logging.error(f"Send error: {e}")
-                        break
-            await asyncio.sleep(2) # Маленькая пауза между запросами к разным людям
-        await asyncio.sleep(60)
+            res = await fetch_cf("user.status", {"handle": handle, "from": 1, "count": 1})
+            if res and res[0]['verdict'] == 'OK':
+                sub = res[0]
+                s_id = sub['id']
+                
+                if handle not in last_solved_ids:
+                    last_solved_ids[handle] = s_id
+                elif last_solved_ids[handle] != s_id:
+                    last_solved_ids[handle] = s_id
+                    p = sub['problem']
+                    msg = (f"🔥 **{handle}** решил задачу!\n\n"
+                           f"📝 {p['name']}\n"
+                           f"📊 Рейтинг: {p.get('rating', '???')}\n"
+                           f"🏷 `{', '.join(p.get('tags', []))}`\n"
+                           f"🔗 [Открыть задачу](https://codeforces.com/contest/{sub.get('contestId')}/problem/{p['index']})")
+                    try:
+                        await bot.send_message(ADMIN_ID, msg, parse_mode="Markdown", disable_web_page_preview=True)
+                    except Exception as e:
+                        logger.error(f"Notify error: {e}")
+            await asyncio.sleep(2) # Пауза между запросами к API
+        await asyncio.sleep(60) # Пауза между полными циклами
 
 async def main():
-    # Настройка команд
-    commands = [
-        BotCommand(command="start", description="Инфо о боте"),
-        BotCommand(command="cf_follow", description="Добавить друга для слежки"),
-        BotCommand(command="weak", description="Твои слабые темы"),
-        BotCommand(command="compare", description="Сравнить с другом"),
-        BotCommand(command="list", description="Кто в списке?")
-    ]
-    await bot.set_my_commands(commands)
+    # Регистрация меню
+    await bot.set_my_commands([
+        BotCommand(command="start", description="Перезапустить"),
+        BotCommand(command="cf_follow", description="Следить за ником"),
+        BotCommand(command="list", description="Кто в списке?"),
+        BotCommand(command="weak", description="Анализ ошибок"),
+        BotCommand(command="contests", description="Расписание")
+    ])
     
     asyncio.create_task(checker())
-    print("Бот успешно запущен!")
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        logging.info("Бот остановлен")
-
+        pass
