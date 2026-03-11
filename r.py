@@ -134,7 +134,11 @@ async def cmd_help(message: types.Message):
     await message.answer("🛠 30+ команд доступны! \nПримеры: /done, /stats, /calc, /joke, /quiz, /pomo...")
 
 async def main():
+    # Эта строчка удаляет вебхук и старые запросы, предотвращая конфликт
+    await bot.delete_webhook(drop_pending_updates=True)
+    print("Бот успешно запущен! Конфликты устранены.")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
+
