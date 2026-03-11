@@ -212,8 +212,7 @@ Contest: {contest}
 
 # ---------- MAIN ----------
 
-async def main():
-
+def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -223,21 +222,11 @@ async def main():
     app.add_handler(CommandHandler("rating", rating))
     app.add_handler(CommandHandler("last", last))
 
-    commands = [
-        BotCommand("start","start bot"),
-        BotCommand("add","add handle"),
-        BotCommand("remove","remove handle"),
-        BotCommand("list","list handles"),
-        BotCommand("rating","user rating"),
-        BotCommand("last","last submissions")
-    ]
-
-    await app.bot.set_my_commands(commands)
-
     asyncio.create_task(tracker(app))
 
-    await app.run_polling()
+    app.run_polling()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
+
