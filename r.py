@@ -15,7 +15,14 @@ MY_HANDLE = "whyy"
 
 CHECK_INTERVAL = 60  # проверка каждые 60 секунд
 
-bot = Bot(TOKEN, parse_mode="HTML")
+from aiogram.client.bot import DefaultBotProperties
+
+bot = Bot(
+    token=TOKEN,
+    default=DefaultBotProperties(
+        parse_mode="HTML"  # теперь указываем здесь
+    )
+)
 dp = Dispatcher()
 
 logging.basicConfig(level=logging.INFO)
@@ -251,3 +258,4 @@ async def main():
 
 if __name__=="__main__":
     asyncio.run(main())
+
