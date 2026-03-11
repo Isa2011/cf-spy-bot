@@ -134,12 +134,18 @@ async def cmd_help(message: types.Message):
     await message.answer("🛠 30+ команд доступны! \nПримеры: /done, /stats, /calc, /joke, /quiz, /pomo...")
 
 async def main():
-    # Эта строчка удаляет вебхук и старые запросы, предотвращая конфликт
-    await bot.delete_webhook(drop_pending_updates=True)
-    print("Бот успешно запущен! Конфликты устранены.")
+    # Эта команда говорит Telegram: "Забудь все старые попытки подключения"
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        print("--- СОЕДИНЕНИЕ СБРОШЕНО ---")
+    except Exception as e:
+        print(f"Ошибка при сбросе: {e}")
+
+    print("Бот @kryx7_bot запускается...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
