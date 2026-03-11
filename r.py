@@ -7,11 +7,13 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
+# ---------------- Настройки ----------------
 TOKEN = "8771638954:AAG9mrksptIJKh-62ltsIVp-UF1E8GTqswA"
-OWNER_ID = 7951275068
+OWNER_ID = 7951275068  # твой Telegram ID
+CHAT_ID = -4993544380  # ID группы/канала для уведомлений
 MY_HANDLE = "whyy"
 
-CHECK_INTERVAL = 60
+CHECK_INTERVAL = 60  # проверка каждые 60 секунд
 
 bot = Bot(TOKEN, parse_mode="HTML")
 dp = Dispatcher()
@@ -23,10 +25,10 @@ last_submissions = {}
 
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="🎯 Предложи задачу")],
-        [KeyboardButton(text="📊 Моя статистика")],
-        [KeyboardButton(text="🏆 Топ друзей")],
-        [KeyboardButton(text="📈 Рейтинг")]
+        [KeyboardButton(text="Предложить задачу")],
+        [KeyboardButton(text="Моя статистика")],
+        [KeyboardButton(text="Топ друзей")],
+        [KeyboardButton(text="Рейтинг")]
     ],
     resize_keyboard=True
 )
@@ -90,19 +92,18 @@ async def monitor_friends():
                         index = p["index"]
                         link = f"https://codeforces.com/problemset/problem/{contest}/{index}"
                         msg = f"""
-🏆 <b>Победа!</b>
+Пользователь {handle} только что решил задачу:
 
-👤 <b>{handle}</b> решил задачу
-
-📌 <a href="{link}">{name}</a>
-⭐ Рейтинг: <b>{rating}</b>
-
-🔥 Отличная работа!
+<a href="{link}">{name}</a>
+Рейтинг задачи: {rating}
 """
+                        # Отправка в личку владельцу
                         await bot.send_message(OWNER_ID, msg)
+                        # Отправка в группу/канал
+                        await bot.send_message(CHAT_ID, msg)
                 last_submissions[handle] = subs[0]["id"]
         except Exception as e:
-            print(e)
+            print("Ошибка мониторинга друзей:", e)
         await asyncio.sleep(CHECK_INTERVAL)
 
 # ---------------- Suggest ---------------- #
@@ -126,26 +127,26 @@ async def suggest_problem():
             if (p["contestId"], p["index"]) not in solved:
                 candidates.append(p)
     if not candidates:
-        return "Не найдено задач 😢"
+        return "Не найдено задач"
     p = random.choice(candidates)
     link = f"https://codeforces.com/problemset/problem/{p['contestId']}/{p['index']}"
     return f"""
-🎯 <b>Попробуй решить</b>
+Попробуй решить задачу:
 
-📌 <a href="{link}">{p['name']}</a>
-⭐ Рейтинг: <b>{p['rating']}</b>
-
+<a href="{link}">{p['name']}</a>
+Рейтинг: {p['rating']}
+"""
 
 # ---------------- Команды ---------------- #
 
 @dp.message(Command("start"))
 async def start(msg: types.Message):
-    await msg.answer("👋 Бот Codeforces запущен!", reply_markup=keyboard)
+    await msg.answer("Бот Codeforces запущен!", reply_markup=keyboard)
 
 @dp.message(Command("help"))
 async def help_cmd(msg: types.Message):
     text = """
-📜 <b>Команды бота</b>
+Команды бота:
 
 /suggest — предложить задачу
 /stats — статистика
@@ -166,12 +167,11 @@ async def suggest(msg: types.Message):
 async def stats(msg: types.Message):
     user = await get_user_info(MY_HANDLE)
     text = f"""
-📊 <b>Статистика</b>
+Статистика пользователя {MY_HANDLE}:
 
-👤 {MY_HANDLE}
-⭐ Рейтинг: {user.get("rating","нет")}
-🏆 Макс: {user.get("maxRating","нет")}
-🎖 Ранг: {user.get("rank","")}
+Рейтинг: {user.get("rating","нет")}
+Максимальный рейтинг: {user.get("maxRating","нет")}
+Ранг: {user.get("rank","")}
 """
     await msg.answer(text)
 
@@ -183,7 +183,7 @@ async def top(msg: types.Message):
         info = await get_user_info(f)
         users.append((f, info.get("rating",0)))
     users.sort(key=lambda x:x[1], reverse=True)
-    text = "🏆 <b>Топ друзей</b>\n\n"
+    text = "Топ друзей:\n\n"
     for i,(n,r) in enumerate(users,1):
         text += f"{i}. {n} — {r}\n"
     await msg.answer(text)
@@ -191,7 +191,7 @@ async def top(msg: types.Message):
 @dp.message(Command("rating"))
 async def rating(msg: types.Message):
     user = await get_user_info(MY_HANDLE)
-    await msg.answer(f"⭐ Рейтинг {MY_HANDLE}: <b>{user.get('rating','нет')}</b>")
+    await msg.answer(f"Рейтинг {MY_HANDLE}: {user.get('rating','нет')}")
 
 @dp.message(Command("solved"))
 async def solved(msg: types.Message):
@@ -200,32 +200,32 @@ async def solved(msg: types.Message):
     for s in subs:
         if s["verdict"] == "OK":
             solved.add((s["problem"]["contestId"], s["problem"]["index"]))
-    await msg.answer(f"✅ Решено задач: <b>{len(solved)}</b>")
+    await msg.answer(f"Решено задач: {len(solved)}")
 
 @dp.message(Command("contest"))
 async def contests(msg: types.Message):
     contests = await get_contests()
     upcoming = [c for c in contests if c["phase"]=="BEFORE"]
-    text = "🏁 <b>Ближайшие контесты</b>\n\n"
+    text = "Ближайшие контесты:\n\n"
     for c in upcoming[:5]:
         text += f"{c['name']}\n"
     await msg.answer(text)
 
 # ---------------- кнопки ---------------- #
 
-@dp.message(lambda m: m.text=="🎯 Предложи задачу")
+@dp.message(lambda m: m.text=="Предложить задачу")
 async def btn1(msg: types.Message):
     await msg.answer(await suggest_problem())
 
-@dp.message(lambda m: m.text=="📊 Моя статистика")
+@dp.message(lambda m: m.text=="Моя статистика")
 async def btn2(msg: types.Message):
     await stats(msg)
 
-@dp.message(lambda m: m.text=="🏆 Топ друзей")
+@dp.message(lambda m: m.text=="Топ друзей")
 async def btn3(msg: types.Message):
     await top(msg)
 
-@dp.message(lambda m: m.text=="📈 Рейтинг")
+@dp.message(lambda m: m.text=="Рейтинг")
 async def btn4(msg: types.Message):
     await rating(msg)
 
