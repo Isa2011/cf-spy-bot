@@ -1,471 +1,253 @@
 import asyncio
-import logging
 import random
+import logging
 import aiohttp
-import json
+from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-TOKEN = "8653073291:AAG6jr04iA3i6-_3VXsHjSgXoipZtSC88fM"
+TOKEN = "8771638954:AAG9mrksptIJKh-62ltsIVp-UF1E8GTqswA"
 OWNER_ID = 7951275068
+MY_HANDLE = "whyy"
 
-bot = Bot(TOKEN)
+CHECK_INTERVAL = 60
+
+bot = Bot(TOKEN, parse_mode="HTML")
 dp = Dispatcher()
 
 logging.basicConfig(level=logging.INFO)
 
-USERS_FILE = "users.json"
-XP_FILE = "xp.json"
+session = aiohttp.ClientSession()
+last_submissions = {}
 
-# ===== загрузка =====
+keyboard = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="🎯 Предложи задачу")],
+        [KeyboardButton(text="📊 Моя статистика")],
+        [KeyboardButton(text="🏆 Топ друзей")],
+        [KeyboardButton(text="📈 Рейтинг")]
+    ],
+    resize_keyboard=True
+)
 
-def load(file):
-    try:
-        with open(file,"r") as f:
-            return json.load(f)
-    except:
-        return {}
+# ---------------- API ---------------- #
 
-def save(file,data):
-    with open(file,"w") as f:
-        json.dump(data,f)
+async def get_user_info(handle):
+    url = f"https://codeforces.com/api/user.info?handles={handle}"
+    async with session.get(url) as r:
+        data = await r.json()
+        return data["result"][0]
 
-tracked = load(USERS_FILE)
-xp = load(XP_FILE)
+async def get_user_submissions(handle):
+    url = f"https://codeforces.com/api/user.status?handle={handle}&from=1&count=50"
+    async with session.get(url) as r:
+        data = await r.json()
+        return data["result"]
 
-last_submission = {}
+async def get_problems():
+    url = "https://codeforces.com/api/problemset.problems"
+    async with session.get(url) as r:
+        data = await r.json()
+        return data["result"]
 
-# ===== мотивация =====
+async def get_contests():
+    url = "https://codeforces.com/api/contest.list"
+    async with session.get(url) as r:
+        data = await r.json()
+        return data["result"]
 
-motivation = [
-"🔥 Ты станешь легендой Codeforces",
-"⚡ Сегодня ты станешь сильнее",
-"🚀 Никогда не сдавайся",
-"👑 Grandmaster начинается с одной задачи",
-"💪 Решай ещё одну!"
-]
+async def get_friends():
+    url = f"https://codeforces.com/api/user.friends?handle={MY_HANDLE}"
+    async with session.get(url) as r:
+        data = await r.json()
+        return data["result"]  # список handle друзей
 
-# ===== троллинг =====
+# ---------------- Мониторинг ---------------- #
 
-taunt = [
-"😱 О НЕТ! Он решил задачу!",
-"🚨 Срочно решай быстрее!",
-"💀 Ты отстаешь...",
-"🔥 Он становится сильнее!",
-"👀 Похоже тебе пора тренироваться"
-]
+async def monitor_friends():
+    await bot.wait_until_ready()
+    while True:
+        try:
+            friends = await get_friends()
+            for handle in friends:
+                subs = await get_user_submissions(handle)
+                if not subs:
+                    continue
 
-# ===== уровни =====
+                if handle not in last_submissions:
+                    last_submissions[handle] = subs[0]["id"]
+                    continue
 
-def level(points):
-    return points // 100
+                for s in subs:
+                    if s["id"] == last_submissions[handle]:
+                        break
+                    if s["verdict"] == "OK":
+                        p = s["problem"]
+                        name = p["name"]
+                        rating = p.get("rating", "?")
+                        contest = p["contestId"]
+                        index = p["index"]
+                        link = f"https://codeforces.com/problemset/problem/{contest}/{index}"
+                        msg = f"""
+🏆 <b>Победа!</b>
 
-# ===== Codeforces API =====
+👤 <b>{handle}</b> решил задачу
 
-async def cf_user(handle):
+📌 <a href="{link}">{name}</a>
+⭐ Рейтинг: <b>{rating}</b>
 
-    async with aiohttp.ClientSession() as s:
+🔥 Отличная работа!
+"""
+                        await bot.send_message(OWNER_ID, msg)
+                last_submissions[handle] = subs[0]["id"]
+        except Exception as e:
+            print(e)
+        await asyncio.sleep(CHECK_INTERVAL)
 
-        url=f"https://codeforces.com/api/user.info?handles={handle}"
+# ---------------- Suggest ---------------- #
 
-        async with s.get(url) as r:
+async def suggest_problem():
+    user = await get_user_info(MY_HANDLE)
+    rating = user.get("rating", 1200)
+    data = await get_problems()
+    problems = data["problems"]
+    subs = await get_user_submissions(MY_HANDLE)
+    solved = set()
+    for s in subs:
+        if s["verdict"] == "OK":
+            solved.add((s["problem"]["contestId"], s["problem"]["index"]))
+    candidates = []
+    for p in problems:
+        if "rating" not in p:
+            continue
+        r = p["rating"]
+        if rating + 100 <= r <= 2500:
+            if (p["contestId"], p["index"]) not in solved:
+                candidates.append(p)
+    if not candidates:
+        return "Не найдено задач 😢"
+    p = random.choice(candidates)
+    link = f"https://codeforces.com/problemset/problem/{p['contestId']}/{p['index']}"
+    return f"""
+🎯 <b>Попробуй решить</b>
 
-            data=await r.json()
+📌 <a href="{link}">{p['name']}</a>
+⭐ Рейтинг: <b>{p['rating']}</b>
 
-            if data["status"]!="OK":
-                return None
 
-            return data["result"][0]
-
-# ===== random problem =====
-
-async def random_problem():
-
-    async with aiohttp.ClientSession() as s:
-
-        url="https://codeforces.com/api/problemset.problems"
-
-        async with s.get(url) as r:
-
-            data=await r.json()
-
-            problems=data["result"]["problems"]
-
-            p=random.choice(problems)
-
-            return f"https://codeforces.com/problemset/problem/{p['contestId']}/{p['index']}"
-
-# ===== start =====
+# ---------------- Команды ---------------- #
 
 @dp.message(Command("start"))
-async def start(message:types.Message):
-
-    await message.answer(
-"""
-🚀 *Codeforces Spy Bot*
-
-💻 следит за соперниками  
-⚔ помогает тренироваться  
-🔥 мотивирует
-
-/help
-""",
-parse_mode="Markdown"
-)
-
-# ===== help =====
+async def start(msg: types.Message):
+    await msg.answer("👋 Бот Codeforces запущен!", reply_markup=keyboard)
 
 @dp.message(Command("help"))
-async def help(message:types.Message):
+async def help_cmd(msg: types.Message):
+    text = """
+📜 <b>Команды бота</b>
 
-    await message.answer(
+/suggest — предложить задачу
+/stats — статистика
+/top — топ друзей
+/solved — решено задач
+/rating — рейтинг
+/contest — контесты
+/problem <rating> — задача по рейтингу
+/compare <handle> — сравнить рейтинг
 """
-📚 КОМАНДЫ
+    await msg.answer(text)
 
-👀 слежка
-/add
-/remove
-/list
+@dp.message(Command("suggest"))
+async def suggest(msg: types.Message):
+    await msg.answer(await suggest_problem())
 
-📊 Codeforces
-/rating
-/info
-/history
+@dp.message(Command("stats"))
+async def stats(msg: types.Message):
+    user = await get_user_info(MY_HANDLE)
+    text = f"""
+📊 <b>Статистика</b>
 
-🧠 задачи
-/problem
-/easy
-/medium
-/hard
-
-🎮 игры
-/coin
-/dice
-
-🏆 система
-/xp
-/top
-/level
-
-⚔ дуэли
-/duel
-
-🔥 мотивация
-/motivation
-/daily
-/goal
+👤 {MY_HANDLE}
+⭐ Рейтинг: {user.get("rating","нет")}
+🏆 Макс: {user.get("maxRating","нет")}
+🎖 Ранг: {user.get("rank","")}
 """
-)
-
-# ===== add =====
-
-@dp.message(Command("add"))
-async def add(message:types.Message):
-
-    args=message.text.split()
-
-    if len(args)<2:
-        await message.answer("используй /add handle")
-        return
-
-    handle=args[1]
-
-    tracked[handle]=True
-    save(USERS_FILE,tracked)
-
-    await message.answer(f"✅ теперь я слежу за {handle}")
-
-# ===== remove =====
-
-@dp.message(Command("remove"))
-async def remove(message:types.Message):
-
-    args=message.text.split()
-
-    if len(args)<2:
-        return
-
-    handle=args[1]
-
-    if handle in tracked:
-
-        del tracked[handle]
-        save(USERS_FILE,tracked)
-
-    await message.answer("❌ удален")
-
-# ===== list =====
-
-@dp.message(Command("list"))
-async def list_users(message:types.Message):
-
-    if not tracked:
-        await message.answer("список пуст")
-        return
-
-    text="👀 отслеживаемые\n\n"
-
-    for u in tracked:
-        text+=f"• {u}\n"
-
-    await message.answer(text)
-
-# ===== rating =====
-
-@dp.message(Command("rating"))
-async def rating(message:types.Message):
-
-    args=message.text.split()
-
-    if len(args)<2:
-        return
-
-    handle=args[1]
-
-    u=await cf_user(handle)
-
-    if not u:
-        await message.answer("не найден")
-        return
-
-    await message.answer(
-f"""
-👤 {handle}
-
-📈 рейтинг: {u.get("rating",0)}
-🏆 ранг: {u.get("rank","")}
-
-🔥 {random.choice(motivation)}
-"""
-)
-
-# ===== info =====
-
-@dp.message(Command("info"))
-async def info(message:types.Message):
-
-    args=message.text.split()
-
-    if len(args)<2:
-        return
-
-    handle=args[1]
-
-    u=await cf_user(handle)
-
-    if not u:
-        return
-
-    await message.answer(
-f"""
-👤 {handle}
-
-🏆 rank: {u.get("rank")}
-📈 rating: {u.get("rating")}
-⭐ max rating: {u.get("maxRating")}
-"""
-)
-
-# ===== задачи =====
-
-@dp.message(Command("problem"))
-async def problem(message:types.Message):
-
-    p=await random_problem()
-
-    await message.answer(
-f"""
-🧠 задача
-
-{p}
-
-🔥 {random.choice(motivation)}
-"""
-)
-
-@dp.message(Command("easy"))
-async def easy(message:types.Message):
-
-    await message.answer("🟢 easy задача\n"+await random_problem())
-
-@dp.message(Command("medium"))
-async def medium(message:types.Message):
-
-    await message.answer("🟡 medium задача\n"+await random_problem())
-
-@dp.message(Command("hard"))
-async def hard(message:types.Message):
-
-    await message.answer("🔴 hard задача\n"+await random_problem())
-
-# ===== XP =====
-
-@dp.message(Command("xp"))
-async def xp_cmd(message:types.Message):
-
-    uid=str(message.from_user.id)
-
-    points=xp.get(uid,0)
-
-    await message.answer(
-f"""
-🎮 XP: {points}
-
-🏆 уровень: {level(points)}
-"""
-)
-
-# ===== top =====
+    await msg.answer(text)
 
 @dp.message(Command("top"))
-async def top(message:types.Message):
+async def top(msg: types.Message):
+    friends = await get_friends()
+    users = []
+    for f in friends:
+        info = await get_user_info(f)
+        users.append((f, info.get("rating",0)))
+    users.sort(key=lambda x:x[1], reverse=True)
+    text = "🏆 <b>Топ друзей</b>\n\n"
+    for i,(n,r) in enumerate(users,1):
+        text += f"{i}. {n} — {r}\n"
+    await msg.answer(text)
 
-    ranking=sorted(xp.items(),key=lambda x:-x[1])
+@dp.message(Command("rating"))
+async def rating(msg: types.Message):
+    user = await get_user_info(MY_HANDLE)
+    await msg.answer(f"⭐ Рейтинг {MY_HANDLE}: <b>{user.get('rating','нет')}</b>")
 
-    text="🏆 TOP\n\n"
+@dp.message(Command("solved"))
+async def solved(msg: types.Message):
+    subs = await get_user_submissions(MY_HANDLE)
+    solved = set()
+    for s in subs:
+        if s["verdict"] == "OK":
+            solved.add((s["problem"]["contestId"], s["problem"]["index"]))
+    await msg.answer(f"✅ Решено задач: <b>{len(solved)}</b>")
 
-    for i,(u,p) in enumerate(ranking[:10],1):
+@dp.message(Command("contest"))
+async def contests(msg: types.Message):
+    contests = await get_contests()
+    upcoming = [c for c in contests if c["phase"]=="BEFORE"]
+    text = "🏁 <b>Ближайшие контесты</b>\n\n"
+    for c in upcoming[:5]:
+        text += f"{c['name']}\n"
+    await msg.answer(text)
 
-        text+=f"{i}. {u} — {p}\n"
+# ---------------- кнопки ---------------- #
 
-    await message.answer(text)
+@dp.message(lambda m: m.text=="🎯 Предложи задачу")
+async def btn1(msg: types.Message):
+    await msg.answer(await suggest_problem())
 
-# ===== игры =====
+@dp.message(lambda m: m.text=="📊 Моя статистика")
+async def btn2(msg: types.Message):
+    await stats(msg)
 
-@dp.message(Command("coin"))
-async def coin(message:types.Message):
+@dp.message(lambda m: m.text=="🏆 Топ друзей")
+async def btn3(msg: types.Message):
+    await top(msg)
 
-    r=random.choice(["орел","решка"])
+@dp.message(lambda m: m.text=="📈 Рейтинг")
+async def btn4(msg: types.Message):
+    await rating(msg)
 
-    await message.answer(f"🪙 {r}")
+# ---------------- Keep Alive ---------------- #
 
-@dp.message(Command("dice"))
-async def dice(message:types.Message):
+async def handle(request):
+    return web.Response(text="Bot alive")
 
-    await message.answer(f"🎲 {random.randint(1,6)}")
+async def start_web():
+    app = web.Application()
+    app.router.add_get('/', handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    await site.start()
 
-# ===== мотивация =====
-
-@dp.message(Command("motivation"))
-async def motiv(message:types.Message):
-
-    await message.answer(random.choice(motivation))
-
-# ===== daily =====
-
-@dp.message(Command("daily"))
-async def daily(message:types.Message):
-
-    await message.answer(
-"""
-🔥 сегодня
-
-реши 3 задачи
-прочитай editorial
-изучи новую тему
-
-🚀 вперед!
-"""
-)
-
-# ===== duel =====
-
-@dp.message(Command("duel"))
-async def duel(message:types.Message):
-
-    args=message.text.split()
-
-    if len(args)<2:
-        return
-
-    enemy=args[1]
-
-    p=await random_problem()
-
-    await message.answer(
-f"""
-⚔ DUEL
-
-ты vs {enemy}
-
-{p}
-
-кто решит быстрее?
-"""
-)
-
-# ===== spy =====
-
-async def spy():
-
-    while True:
-
-        try:
-
-            async with aiohttp.ClientSession() as s:
-
-                for u in tracked:
-
-                    url=f"https://codeforces.com/api/user.status?handle={u}&from=1&count=1"
-
-                    async with s.get(url) as r:
-
-                        data=await r.json()
-
-                        if data["status"]!="OK":
-                            continue
-
-                        submission = data["result"][0]
-
-                        sub = submission["id"]
-                        
-                        problem = submission["problem"]
-                        
-                        contest = problem["contestId"]
-                        index = problem["index"]
-                        
-                        name = problem["name"]
-                        rating = problem.get("rating","?")
-                        
-                        link = f"https://codeforces.com/contest/{contest}/problem/{index}"
-
-                        if u not in last_submission:
-
-                            last_submission[u]=sub
-
-                        elif last_submission[u]!=sub:
-
-                            last_submission[u]=sub
-
-                            await bot.send_message(
-OWNER_ID,
-f"""
-🚨 ALERT
-
-{random.choice(taunt)}
-
-👤 {u} решил новую задачу!
-
-🔥 быстрее решай!
-"""
-)
-
-        except Exception as e:
-
-            print(e)
-
-        await asyncio.sleep(60)
-
-# ===== main =====
+# ---------------- main ---------------- #
 
 async def main():
-
-    await bot.delete_webhook(drop_pending_updates=True)
-
-    asyncio.create_task(spy())
-
+    asyncio.create_task(monitor_friends())
+    asyncio.create_task(start_web())
     await dp.start_polling(bot)
 
 if __name__=="__main__":
     asyncio.run(main())
-
