@@ -74,7 +74,7 @@ async def cmd_follow(message: types.Message, command: CommandObject):
     handle = command.args.strip()
     FRIENDS.add(handle)
     save_db(FRIENDS)
-    await message.answer(f"✅ Теперь я слежу за **{handle}**", parse_mode="Markdown")
+    await message.answer(f"✅ Теперь я слежу за <b>{handle}</b>", parse_mode="HTML")
 
 @dp.message(Command("list"))
 async def cmd_list(message: types.Message):
@@ -138,7 +138,20 @@ async def checker():
             await asyncio.sleep(2) # Пауза между запросами к API
         await asyncio.sleep(60) # Пауза между полными циклами
 
+from aiohttp import web # Добавь этот импорт в самый верх
+
+async def handle(request):
+    return web.Response(text="Bot is running")
+
 async def main():
+    # Создаем фиктивный веб-сервер для Render
+    app = web.Application()
+    app.router.add_get("/", handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 10000) # Render ищет порт 10000
+    await site.start()
+
     # Регистрация меню
     await bot.set_my_commands([
         BotCommand(command="start", description="Перезапустить"),
@@ -151,8 +164,3 @@ async def main():
     asyncio.create_task(checker())
     await dp.start_polling(bot)
 
-if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        pass
