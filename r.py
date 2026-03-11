@@ -24,7 +24,8 @@ def load_db():
         try:
             with open(DB_FILE, "r") as f:
                 return set(json.load(f))
-        except: return set()
+        except Exception:
+            return set()
     return set()
 
 def save_db(data):
@@ -33,13 +34,12 @@ def save_db(data):
 
 FRIENDS = load_db()
 last_solved_ids = {}
-session = None
+session_container = {"session": None}
 
 async def get_session():
-    global session
-    if session is None or session.closed:
-        session = aiohttp.ClientSession()
-    return session
+    if session_container["session"] is None or session_container["session"].closed:
+        session_container["session"] = aiohttp.ClientSession()
+    return session_container["session"]
 
 async def fetch_cf(method, params=None):
     s = await get_session()
@@ -109,11 +109,12 @@ async def cmd_contests(message: types.Message):
         text += f"🏆 {c['name']}\n\n"
     await message.answer(text, parse_mode="Markdown")
 
-# --- МОНИТОРИНГ ---
+# --- ФОНОВЫЙ МОНИТОРИНГ ---
 async def checker():
     await asyncio.sleep(5)
     while True:
-        for handle in list(FRIENDS):
+        current_friends = list(FRIENDS)
+        for handle in current_friends:
             res = await fetch_cf("user.status", {"handle": handle, "from": 1, "count": 1})
             if res and res[0]['verdict'] == 'OK':
                 sub = res[0]
@@ -135,11 +136,12 @@ async def checker():
             await asyncio.sleep(2)
         await asyncio.sleep(60)
 
-# --- ВЕБ-СЕРВЕР ДЛЯ RENDER ---
+# --- WEB СЕРВЕР (Для Render) ---
 async def handle_web(request):
-    return web.Response(text="Bot is running")
+    return web.Response(text="Bot is running!")
 
 async def main():
+    # Запуск сервера на порту 10000 для Render
     app = web.Application()
     app.router.add_get("/", handle_web)
     runner = web.AppRunner(app)
@@ -147,6 +149,7 @@ async def main():
     site = web.TCPSite(runner, "0.0.0.0", 10000)
     await site.start()
 
+    # Настройка команд меню
     await bot.set_my_commands([
         BotCommand(command="start", description="Перезапустить"),
         BotCommand(command="cf_follow", description="Следить за ником"),
@@ -155,10 +158,11 @@ async def main():
         BotCommand(command="contests", description="Расписание")
     ])
     
+    # Запуск фоновой проверки и основного цикла бота
     asyncio.create_task(checker())
     await dp.start_polling(bot)
 
-# ЭТОТ БЛОК ОБЯЗАТЕЛЕН:
+# ФИНАЛЬНЫЙ БЛОК ЗАПУСКА
 if __name__ == "__main__":
     try:
         asyncio.run(main())
