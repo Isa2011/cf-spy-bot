@@ -2,8 +2,8 @@ import logging
 import random
 import aiohttp
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 TOKEN = "8653073291:AAG6jr04iA3i6-_3VXsHjSgXoipZtSC88fM"
 OWNER_ID = 7951275068
@@ -15,18 +15,21 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 # ===== Проверка владельца =====
-def owner_only(func):
-    async def wrapper(message: types.Message):
-        if message.from_user.id != OWNER_ID:
+async def check_owner(message: types.Message | types.CallbackQuery):
+    user_id = message.from_user.id
+    if user_id != OWNER_ID:
+        if isinstance(message, types.Message):
             await message.reply("⛔ Эта команда доступна только главному")
-            return
-        await func(message)
-    return wrapper
+        else:
+            await message.message.edit_text("⛔ Эта кнопка доступна только главному")
+        return False
+    return True
 
 # ===== Главное меню =====
 @dp.message(Command("start"))
-@owner_only
 async def cmd_start(message: types.Message):
+    if not await check_owner(message):
+        return
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Codeforces", callback_data="cf")],
         [InlineKeyboardButton(text="Случайное число", callback_data="random")],
@@ -37,24 +40,28 @@ async def cmd_start(message: types.Message):
 
 # ===== Команды =====
 @dp.message(Command("cf"))
-@owner_only
 async def cmd_cf(message: types.Message):
+    if not await check_owner(message):
+        return
     rating = await get_cf_rating(CODEFORCES_HANDLE)
     await message.reply(f"💻 {CODEFORCES_HANDLE} — рейтинг: {rating}")
 
 @dp.message(Command("random"))
-@owner_only
 async def cmd_random(message: types.Message):
+    if not await check_owner(message):
+        return
     await message.reply(f"🎲 Случайное число: {random.randint(1,100)}")
 
 @dp.message(Command("joke"))
-@owner_only
 async def cmd_joke(message: types.Message):
+    if not await check_owner(message):
+        return
     await message.reply("😂 Почему программисты любят темноту? Потому что свет привлекает баги!")
 
 @dp.message(Command("help"))
-@owner_only
 async def cmd_help(message: types.Message):
+    if not await check_owner(message):
+        return
     await message.reply("""
 Доступные команды:
 /start - Главное меню
@@ -67,11 +74,9 @@ async def cmd_help(message: types.Message):
 # ===== Обработчик кнопок =====
 @dp.callback_query()
 async def cb_handler(query: types.CallbackQuery):
-    await query.answer()
-    if query.from_user.id != OWNER_ID:
-        await query.message.edit_text("⛔ Эта кнопка доступна только главному")
+    if not await check_owner(query):
         return
-
+    await query.answer()
     if query.data == "cf":
         rating = await get_cf_rating(CODEFORCES_HANDLE)
         await query.message.edit_text(f"💻 {CODEFORCES_HANDLE} — рейтинг: {rating}")
@@ -101,7 +106,7 @@ async def get_cf_rating(handle):
     except:
         return "ошибка"
 
-# ===== Запуск бота с очисткой обновлений =====
+# ===== Запуск бота с очисткой старых обновлений =====
 if __name__ == "__main__":
     import asyncio
 
