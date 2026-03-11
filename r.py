@@ -3,7 +3,6 @@ import requests
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
-import asyncio
 
 # ========== Настройки ==========
 TOKEN = "8653073291:AAG6jr04iA3i6-_3VXsHjSgXoipZtSC88fM"
@@ -99,7 +98,7 @@ def get_cf_rating(handle):
         return "ошибка"
 
 # ========== Основной запуск ==========
-async def main():
+if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -109,7 +108,5 @@ async def main():
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CallbackQueryHandler(button))
 
-    await app.run_polling()
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    # ⚡ Важно: запускаем без asyncio.run()
+    app.run_polling()
