@@ -14,8 +14,6 @@ dp = Dispatcher()
 
 logging.basicConfig(level=logging.INFO)
 
-# ===== файлы =====
-
 USERS_FILE = "users.json"
 XP_FILE = "xp.json"
 
@@ -37,20 +35,30 @@ xp = load(XP_FILE)
 
 last_submission = {}
 
+# ===== мотивация =====
+
+motivation = [
+"🔥 Ты станешь легендой Codeforces",
+"⚡ Сегодня ты станешь сильнее",
+"🚀 Никогда не сдавайся",
+"👑 Grandmaster начинается с одной задачи",
+"💪 Решай ещё одну!"
+]
+
+# ===== троллинг =====
+
+taunt = [
+"😱 О НЕТ! Он решил задачу!",
+"🚨 Срочно решай быстрее!",
+"💀 Ты отстаешь...",
+"🔥 Он становится сильнее!",
+"👀 Похоже тебе пора тренироваться"
+]
+
 # ===== уровни =====
 
 def level(points):
     return points // 100
-
-# ===== мотивация =====
-
-motivation = [
-"🔥 Ты можешь стать сильнее!",
-"⚡ Реши ещё одну задачу!",
-"🚀 Не останавливайся!",
-"👑 Будущий Grandmaster!",
-"💪 Тренируйся каждый день!"
-]
 
 # ===== Codeforces API =====
 
@@ -69,7 +77,7 @@ async def cf_user(handle):
 
             return data["result"][0]
 
-# ===== задачи =====
+# ===== random problem =====
 
 async def random_problem():
 
@@ -87,7 +95,69 @@ async def random_problem():
 
             return f"https://codeforces.com/problemset/problem/{p['contestId']}/{p['index']}"
 
-# ===== добавление пользователя =====
+# ===== start =====
+
+@dp.message(Command("start"))
+async def start(message:types.Message):
+
+    await message.answer(
+"""
+🚀 *Codeforces Spy Bot*
+
+💻 следит за соперниками  
+⚔ помогает тренироваться  
+🔥 мотивирует
+
+/help
+""",
+parse_mode="Markdown"
+)
+
+# ===== help =====
+
+@dp.message(Command("help"))
+async def help(message:types.Message):
+
+    await message.answer(
+"""
+📚 КОМАНДЫ
+
+👀 слежка
+/add
+/remove
+/list
+
+📊 Codeforces
+/rating
+/info
+/history
+
+🧠 задачи
+/problem
+/easy
+/medium
+/hard
+
+🎮 игры
+/coin
+/dice
+
+🏆 система
+/xp
+/top
+/level
+
+⚔ дуэли
+/duel
+
+🔥 мотивация
+/motivation
+/daily
+/goal
+"""
+)
+
+# ===== add =====
 
 @dp.message(Command("add"))
 async def add(message:types.Message):
@@ -95,7 +165,7 @@ async def add(message:types.Message):
     args=message.text.split()
 
     if len(args)<2:
-        await message.answer("/add handle")
+        await message.answer("используй /add handle")
         return
 
     handle=args[1]
@@ -103,9 +173,9 @@ async def add(message:types.Message):
     tracked[handle]=True
     save(USERS_FILE,tracked)
 
-    await message.answer(f"✅ {handle} добавлен")
+    await message.answer(f"✅ теперь я слежу за {handle}")
 
-# ===== удалить =====
+# ===== remove =====
 
 @dp.message(Command("remove"))
 async def remove(message:types.Message):
@@ -118,28 +188,29 @@ async def remove(message:types.Message):
     handle=args[1]
 
     if handle in tracked:
+
         del tracked[handle]
         save(USERS_FILE,tracked)
 
     await message.answer("❌ удален")
 
-# ===== список =====
+# ===== list =====
 
 @dp.message(Command("list"))
 async def list_users(message:types.Message):
 
     if not tracked:
-        await message.answer("пусто")
+        await message.answer("список пуст")
         return
 
-    text="👀 Отслеживаемые\n\n"
+    text="👀 отслеживаемые\n\n"
 
     for u in tracked:
         text+=f"• {u}\n"
 
     await message.answer(text)
 
-# ===== рейтинг =====
+# ===== rating =====
 
 @dp.message(Command("rating"))
 async def rating(message:types.Message):
@@ -161,12 +232,41 @@ async def rating(message:types.Message):
 f"""
 👤 {handle}
 
-📈 rating: {u.get("rating",0)}
-🏆 rank: {u.get("rank","")}
+📈 рейтинг: {u.get("rating",0)}
+🏆 ранг: {u.get("rank","")}
+
+🔥 {random.choice(motivation)}
 """
 )
 
-# ===== случайная задача =====
+# ===== info =====
+
+@dp.message(Command("info"))
+async def info(message:types.Message):
+
+    args=message.text.split()
+
+    if len(args)<2:
+        return
+
+    handle=args[1]
+
+    u=await cf_user(handle)
+
+    if not u:
+        return
+
+    await message.answer(
+f"""
+👤 {handle}
+
+🏆 rank: {u.get("rank")}
+📈 rating: {u.get("rating")}
+⭐ max rating: {u.get("maxRating")}
+"""
+)
+
+# ===== задачи =====
 
 @dp.message(Command("problem"))
 async def problem(message:types.Message):
@@ -175,7 +275,7 @@ async def problem(message:types.Message):
 
     await message.answer(
 f"""
-🧠 Попробуй решить:
+🧠 задача
 
 {p}
 
@@ -183,10 +283,25 @@ f"""
 """
 )
 
+@dp.message(Command("easy"))
+async def easy(message:types.Message):
+
+    await message.answer("🟢 easy задача\n"+await random_problem())
+
+@dp.message(Command("medium"))
+async def medium(message:types.Message):
+
+    await message.answer("🟡 medium задача\n"+await random_problem())
+
+@dp.message(Command("hard"))
+async def hard(message:types.Message):
+
+    await message.answer("🔴 hard задача\n"+await random_problem())
+
 # ===== XP =====
 
 @dp.message(Command("xp"))
-async def myxp(message:types.Message):
+async def xp_cmd(message:types.Message):
 
     uid=str(message.from_user.id)
 
@@ -200,22 +315,34 @@ f"""
 """
 )
 
-# ===== ежедневная тренировка =====
+# ===== top =====
 
-@dp.message(Command("daily"))
-async def daily(message:types.Message):
+@dp.message(Command("top"))
+async def top(message:types.Message):
 
-    await message.answer(
-"""
-🔥 Сегодня:
+    ranking=sorted(xp.items(),key=lambda x:-x[1])
 
-реши 3 задачи
-изучай DP
-прочитай редакцию
+    text="🏆 TOP\n\n"
 
-🚀 ты сможешь!
-"""
-)
+    for i,(u,p) in enumerate(ranking[:10],1):
+
+        text+=f"{i}. {u} — {p}\n"
+
+    await message.answer(text)
+
+# ===== игры =====
+
+@dp.message(Command("coin"))
+async def coin(message:types.Message):
+
+    r=random.choice(["орел","решка"])
+
+    await message.answer(f"🪙 {r}")
+
+@dp.message(Command("dice"))
+async def dice(message:types.Message):
+
+    await message.answer(f"🎲 {random.randint(1,6)}")
 
 # ===== мотивация =====
 
@@ -224,7 +351,24 @@ async def motiv(message:types.Message):
 
     await message.answer(random.choice(motivation))
 
-# ===== дуэль =====
+# ===== daily =====
+
+@dp.message(Command("daily"))
+async def daily(message:types.Message):
+
+    await message.answer(
+"""
+🔥 сегодня
+
+реши 3 задачи
+прочитай editorial
+изучи новую тему
+
+🚀 вперед!
+"""
+)
+
+# ===== duel =====
 
 @dp.message(Command("duel"))
 async def duel(message:types.Message):
@@ -242,67 +386,15 @@ async def duel(message:types.Message):
 f"""
 ⚔ DUEL
 
-Ты vs {enemy}
-
-задача:
+ты vs {enemy}
 
 {p}
 
-кто решит первым?
+кто решит быстрее?
 """
 )
 
-# ===== топ XP =====
-
-@dp.message(Command("top"))
-async def top(message:types.Message):
-
-    ranking=sorted(xp.items(),key=lambda x:-x[1])
-
-    text="🏆 TOP\n\n"
-
-    for i,(u,p) in enumerate(ranking[:10],1):
-
-        text+=f"{i}. {u} — {p}\n"
-
-    await message.answer(text)
-
-# ===== help =====
-
-@dp.message(Command("help"))
-async def help(message:types.Message):
-
-    await message.answer(
-"""
-📚 команды
-
-/add
-/remove
-/list
-/rating
-/problem
-/xp
-/top
-/daily
-/motivation
-/duel
-"""
-)
-
-# ===== старт =====
-
-@dp.message(Command("start"))
-async def start(message:types.Message):
-
-    await message.answer(
-"""
-🚀 Codeforces Spy Bot
-
-/help
-"""
-)
-
-# ===== слежка за решениями =====
+# ===== spy =====
 
 async def spy():
 
@@ -338,9 +430,11 @@ OWNER_ID,
 f"""
 🚨 ALERT
 
-😱 {u} решил новую задачу!
+{random.choice(taunt)}
 
-🔥 решай быстрее!
+👤 {u} решил новую задачу!
+
+🔥 быстрее решай!
 """
 )
 
