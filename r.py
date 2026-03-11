@@ -9,7 +9,7 @@ from collections import Counter
 
 # --- НАСТРОЙКИ ---
 # Вставь сюда свой токен без пробелов
-API_TOKEN = '8653073291:AAG7ztIMZfgzvfJPr_vXQy5qhvywMWbHbvM' 
+API_TOKEN = '8653073291:AAEZYYUIVROV37Hdx0Cr3ztuSnUhdZ8lzpg' 
 # Вставь сюда СВОЙ числовой ID (узнай в @userinfobot)
 ADMIN_ID = 7951275068  
 
@@ -144,3 +144,4 @@ if __name__ == '__main__':
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         logging.info("Бот остановлен")
+
