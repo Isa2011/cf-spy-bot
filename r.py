@@ -8,7 +8,7 @@ from aiogram.filters import Command
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
 # --- КОНФИГУРАЦИЯ ---
-TOKEN = "8653073291:AAEZYYUIVROV37Hdx0Cr3ztuSnUhdZ8lzpg" 
+TOKEN = "8653073291:AAE2wrd9z9uQecOAs12qCWuinCBlY6ljf5w" 
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=TOKEN)
@@ -141,4 +141,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
