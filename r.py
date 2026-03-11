@@ -1,104 +1,99 @@
+# r.py
 import asyncio
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
-import aiohttp
+import requests
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ParseMode
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# ===== Настройки =====
-TOKEN = "8653073291:AAG6jr04iA3i6-_3VXsHjSgXoipZtSC88fM"
-MAIN_USER = "@kryyx7"  # твой ник в Telegram
-CF_HANDLE = "whyy"  # твой Codeforces ник
-# =====================
+# ====== Настройки ======
+TOKEN = "8653073291:AAG6jr04iA3i6-_3VXsHjSgXoipZtSC88fM"  # <-- вставь свой токен
+OWNER_ID = 7951275068  # <-- твой Telegram ID
+CF_USER = "whyy"  # <-- твой Codeforces ник
+CHECK_INTERVAL = 60  # секунды между проверкой новых решений
 
-bot = Bot(token=TOKEN)
-dp = Dispatcher()
+last_submission_id = None
 
-# ===== Меню =====
-main_menu = InlineKeyboardMarkup(
-    inline_keyboard=[
-        [InlineKeyboardButton(text="Мой CF профиль", callback_data="cf_profile")],
-        [InlineKeyboardButton(text="Топ команд", callback_data="top")],
-        [InlineKeyboardButton(text="Вызов", callback_data="challenge")],
-        [InlineKeyboardButton(text="Эхо", callback_data="echo")],
+# ====== Проверка главного ======
+def is_owner(update: Update):
+    return update.effective_user.id == OWNER_ID
+
+# ====== Команды ======
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update):
+        await update.message.reply_text("⛔️ Эта команда доступна только главному")
+        return
+    keyboard = [
+        [InlineKeyboardButton("Последние решения", callback_data="last")],
+        [InlineKeyboardButton("Статистика", callback_data="stats")],
+        [InlineKeyboardButton("Топ", callback_data="top")],
     ]
-)
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        f"Привет, {CF_USER}! Это твой личный бот 🐱‍💻", reply_markup=reply_markup
+    )
 
-# ===== Проверка главного =====
-def is_main_user(message: Message):
-    return message.from_user.username == MAIN_USER
-
-# ===== /start =====
-@dp.message(Command(commands=["start"]))
-async def start(message: Message):
-    if not is_main_user(message):
-        await message.reply("⛔ Эта команда доступна только главному")
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update):
+        await update.message.reply_text("⛔️ Эта команда доступна только главному")
         return
-    await message.reply(f"✅ Привет, {MAIN_USER}! Вот твое меню:", reply_markup=main_menu)
+    await update.message.reply_text(
+        "/start - Главное меню\n"
+        "/last - Последние решения\n"
+        "/stats - Статистика\n"
+        "/top - Топ проблем\n"
+        "/help - Список команд"
+    )
 
-# ===== Обработка кнопок меню =====
-@dp.callback_query()
-async def menu_handler(query: types.CallbackQuery):
-    user = query.from_user
-    if user.username != MAIN_USER:
-        await query.answer("⛔ Эта команда только для главного!", show_alert=True)
+async def last(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update):
+        await update.message.reply_text("⛔️ Эта команда доступна только главному")
         return
-
-    data = query.data
-
-    if data == "cf_profile":
-        cf_data = await get_cf_info(CF_HANDLE)
-        await query.message.answer(cf_data)
-    elif data == "top":
-        await query.message.answer("🏆 Топ команды: только для главного!")
-    elif data == "challenge":
-        await query.message.answer("⚡ Вызов принят! Готов к новым подвигам!")
-    elif data == "echo":
-        await query.message.answer("Используй команду /echo <текст> чтобы повторить текст")
-    await query.answer()
-
-# ===== /echo =====
-@dp.message(Command(commands=["echo"]))
-async def echo(message: Message):
-    if not is_main_user(message):
-        await message.reply("⛔ Только главный может использовать эту команду!")
+    url = f"https://codeforces.com/api/user.status?handle={CF_USER}&from=1&count=5"
+    r = requests.get(url).json()
+    if r["status"] != "OK":
+        await update.message.reply_text("Ошибка при получении данных CF")
         return
-    text = message.text.replace("/echo", "").strip()
-    if not text:
-        await message.reply("❗ Используй: /echo <текст>")
+    text = ""
+    for sub in r["result"]:
+        pid = sub["problem"]["contestId"]
+        name = sub["problem"]["name"]
+        verdict = sub.get("verdict", "UNKNOWN")
+        text += f"{pid} - {name}: {verdict}\n"
+    await update.message.reply_text(text)
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update):
+        await update.message.reply_text("⛔️ Эта команда доступна только главному")
         return
-    await message.reply(f"📢 {text}")
-
-# ===== Codeforces отслежка =====
-async def get_cf_info(handle: str) -> str:
-    url = f"https://codeforces.com/api/user.info?handles={handle}"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            data = await resp.json()
-            if data["status"] != "OK":
-                return "❌ Ошибка при получении данных CF"
-            user = data["result"][0]
-            info = f"👤 {user['handle']}\n💎 Рейтинг: {user.get('rating', '—')}\n🏅 Ранг: {user.get('rank', '—')}"
-            return info
-
-# ===== Дополнительные команды (пример) =====
-@dp.message(Command(commands=["motivate"]))
-async def motivate(message: Message):
-    if not is_main_user(message):
-        await message.reply("❌ Только главному!")
+    url = f"https://codeforces.com/api/user.info?handles={CF_USER}"
+    r = requests.get(url).json()
+    if r["status"] != "OK":
+        await update.message.reply_text("Ошибка при получении данных CF")
         return
-    await message.reply("💪 Ты лучший! Продолжай решать задачи на Codeforces!")
+    user = r["result"][0]
+    await update.message.reply_text(
+        f"Ник: {user['handle']}\n"
+        f"Рейтинг: {user.get('rating', 'N/A')}\n"
+        f"Макс рейтинг: {user.get('maxRating', 'N/A')}\n"
+        f"Ранг: {user.get('rank', 'N/A')}\n"
+        f"Макс ранг: {user.get('maxRank', 'N/A')}"
+    )
 
-@dp.message(Command(commands=["fun"]))
-async def fun(message: Message):
-    if not is_main_user(message):
-        await message.reply("😂 Только главному доступно веселье!")
+async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update):
+        await update.message.reply_text("⛔️ Эта команда доступна только главному")
         return
-    await message.reply("🎉 Главное — кайфовать от каждого контеста!")
+    await update.message.reply_text("Эта команда в разработке...")
 
-# ===== Запуск бота =====
+# ====== Основной запуск бота ======
 async def main():
-    print("Бот стартовал...")
-    await dp.start_polling(bot)
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("last", last))
+    app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("top", top))
+
+    await app.run_polling()
 
 if __name__ == "__main__":
     asyncio.run(main())
